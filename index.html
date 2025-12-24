@@ -1,0 +1,204 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Evanna's SpiritBox</title>
+  <style>
+    body {
+      background: #111;
+      color: #eee;
+      font-family: system-ui, sans-serif;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      height: 100vh;
+      margin: 0;
+    }
+
+    h1 {
+      margin-bottom: 0.5rem;
+      font-weight: 500;
+    }
+
+    #station {
+      margin-top: 1rem;
+      opacity: 0.8;
+      font-size: 1.1rem;
+    }
+
+    button {
+      margin-top: 2rem;
+      padding: 0.7rem 1.4rem;
+      font-size: 1rem;
+      cursor: pointer;
+      border: none;
+      border-radius: 6px;
+    }
+  </style>
+</head>
+<body>
+
+<h1>Evanna's SpiritBox</h1>
+<div id="station">Click Start</div>
+<button id="start">Start Scanning</button>
+<label for="stationDuration">Station Duration (seconds): <span id="durationLabel">8</span>s</label>
+<input type="range" id="stationDuration" min="0" max="10" value="8" step="0.1">
+
+<audio id="audio1" crossorigin="anonymous"></audio>
+<audio id="audio2" crossorigin="anonymous"></audio>
+
+<script>
+// Backup list of stations in case the dynmaic search fails
+let stations = [
+  { name: "Torontocast", url: "https://cast1.torontocast.com:4610/stream" },
+  { name: "Radio Paradise", url: "https://stream.radioparadise.com/mp3-128" },
+  { name: "BBC World Service", url: "http://stream.live.vc.bbcmedia.co.uk/bbc_world_service" },
+  { name: "BBC News", url: "https://vs-hls-push-ww-live.akamaized.net/x=4/i=urn:bbc:pips:service:bbc_news_channel_hd/t=3840/v=pv14/b=5070016/main.m3u8" },
+  { name: "BBC 1", url: "http://a.files.bbci.co.uk/ms6/live/3441A116-B12E-4D2F-ACA8-C1984642FA4B/audio/simulcast/hls/nonuk/pc_hd_abr_v2/ak/bbc_radio_one.m3u8" },
+  { name: "BBC 2", url: "http://as-hls-ww-live.akamaized.net/pool_74208725/live/ww/bbc_radio_two/bbc_radio_two.isml/bbc_radio_two-audio%3d128000.norewind.m3u8" },
+  { name: "BBC 3", url: "http://as-hls-ww-live.akamaized.net/pool_23461179/live/ww/bbc_radio_three/bbc_radio_three.isml/bbc_radio_three-audio%3d128000.norewind.m3u8" },
+  { name: "BBC 4", url: "http://as-hls-ww-live.akamaized.net/pool_55057080/live/ww/bbc_radio_fourfm/bbc_radio_fourfm.isml/bbc_radio_fourfm-audio%3d128000.norewind.m3u8" },
+  { name: "BBC 4 Extra", url: "http://as-hls-ww-live.akamaized.net/pool_26173715/live/ww/bbc_radio_four_extra/bbc_radio_four_extra.isml/bbc_radio_four_extra-audio%3d128000.norewind.m3u8" },
+  { name: "BBC 5", url: "http://as-hls-ww-live.akamaized.net/pool_89021708/live/ww/bbc_radio_five_live/bbc_radio_five_live.isml/bbc_radio_five_live-audio%3d128000.norewind.m3u8" },
+  { name: "BBC 6", url: "http://as-hls-ww-live.akamaized.net/pool_81827798/live/ww/bbc_6music/bbc_6music.isml/bbc_6music-audio%3d320000.norewind.m3u8" },
+  { name: "Heart 70s", url: "https://media-ssl.musicradio.com/Heart70sMP3" },
+  { name: "Heart 80s", url: "https://media-ssl.musicradio.com/Heart80sMP3" },
+  { name: "Heart 90s", url: "https://media-ssl.musicradio.com/Heart90sMP3" },
+  { name: "Heart London", url: "http://ice-sov.musicradio.com/HeartLondonMP3" },
+  { name: "Heart Dance", url: "https://media-ssl.musicradio.com/HeartDanceMP3" },
+  { name: "Heart Cumbria", url: "http://media-the.musicradio.com/HeartNorthLancsCumbria" }
+];
+
+// Variables for station scan duration
+let stationDuration = 8;
+let intervalId = null;
+
+// Variables for the audio elements and their respective soruces and volumes
+const ctx = new (window.AudioContext || window.webkitAudioContext)();
+const audioEls = [document.getElementById("audio1"), document.getElementById("audio2")];
+const sources = audioEls.map(el => ctx.createMediaElementSource(el));
+const gains = [ctx.createGain(), ctx.createGain()];
+let active = 0;
+
+// Connect the gains and sources
+sources.forEach((src, i) => {
+  src.connect(gains[i]).connect(ctx.destination);
+  gains[i].gain.value = 0;
+});
+
+// Update duration when slider moves
+const durationSlider = document.getElementById("stationDuration");
+const durationLabel = document.getElementById("durationLabel");
+
+// Function to change station length with the value of the slider
+durationSlider.addEventListener("input", (e) => {
+  stationDuration = Number(e.target.value);
+  durationLabel.textContent = stationDuration;
+
+  // If scanning is active, restart interval with new duration
+  if (intervalId) {
+    clearInterval(intervalId);
+    intervalId = setInterval(switchStation, stationDuration * 1000);
+  }
+});
+
+// Function to load extra station names from the radio-browser website
+async function loadStations() {
+  const response = await fetch(
+    "https://de1.api.radio-browser.info/json/stations/bycountrycodeexact/GB?order=random&limit=300"
+  );
+  const data = await response.json();
+
+  // Filter out by embedded audio friendly sources
+  stations = stations.concat(data
+    .filter(s =>
+      s.url_resolved &&
+      s.codec &&
+      /mp3|aac/i.test(s.codec)
+    )
+    .sort(() => Math.random() - 0.5)
+    .slice(0, 100)
+    .map(s => ({
+      name: s.name,
+      url: s.url_resolved
+    })));
+
+  console.log("Loaded stations:", stations);
+}
+
+// Function to create a static noise
+function playStatic(duration = 0.1) {
+  const buffer = ctx.createBuffer(1, ctx.sampleRate * duration, ctx.sampleRate);
+  const data = buffer.getChannelData(0);
+
+  for (let i = 0; i < data.length; i++) {
+    data[i] = Math.random() * 2 - 1;
+  }
+
+  const noise = ctx.createBufferSource();
+  noise.buffer = buffer;
+  noise.connect(ctx.destination);
+  noise.start();
+}
+
+// Function to change to a random station
+function switchStation() {
+  const now = ctx.currentTime;
+
+  next = 1 - active;
+
+  gains[next].gain.cancelScheduledValues(now);
+  gains[active].gain.cancelScheduledValues(now);
+
+  gains[next].gain.setValueAtTime(0, now);
+  gains[next].gain.linearRampToValueAtTime(1, now + 0.1);
+
+  gains[active].gain.setValueAtTime(1, now);
+  gains[active].gain.linearRampToValueAtTime(0, now + 0.1);
+
+  const label = document.getElementById("station");
+  label.style.opacity = 0;
+  setTimeout(() => {
+    label.textContent = station.name;
+    label.style.opacity = 0.85;
+  }, 500);
+
+  active = next;
+  next = 1 - active;
+
+  const station = stations[Math.floor(Math.random() * stations.length)];
+  const audio = audioEls[next];
+  audio.src = station.url;
+  audio.play().catch(() => {});
+
+  //playStatic();
+}
+
+// Manages the looped scanning process once the button is pressed
+function toggleScanning() {
+  if (document.getElementById("start").textContent == "Stop Scanning"){
+    document.getElementById("start").textContent = "Start Scanning";
+    intervalId = null;
+    audioEls[active].src = null;
+    ctx.suspend();
+  }
+  else {
+    document.getElementById("start").textContent = "Stop Scanning";
+    ctx.resume();
+    if (intervalId) return;
+
+    switchStation();
+    intervalId = setInterval(switchStation, 8000);
+  }
+}
+// Assigns the click action to function
+document.getElementById("start").onclick = toggleScanning;
+
+// Call this once, e.g. on page load
+loadStations();
+
+</script>
+
+</body>
+</html>
