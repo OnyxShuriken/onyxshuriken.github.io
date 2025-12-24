@@ -153,44 +153,70 @@ function playStatic(duration = 0.1) {
   noise.start();
 }
 
-// Function to change to a random station
-function switchStation() {
+let switching = false;
+
+async function switchStation() {
+  if (switching) return;
+  switching = true;
+
+  if (ctx.state !== "running") {
+    await ctx.resume();
+  }
+
   const now = ctx.currentTime;
+  const FADE_TIME = 0.6;        // slightly longer = more reliable on iOS
+  const SCHEDULE_OFFSET = 0.05; // gives iOS time to schedule audio
 
-  next = 1 - active;
+  const current = active;
+  const nextIndex = 1 - active;
 
-  gains[next].gain.cancelScheduledValues(now);
-  gains[active].gain.cancelScheduledValues(now);
+  const currentGain = gains[current].gain;
+  const nextGain = gains[nextIndex].gain;
 
-  gains[next].gain.setValueAtTime(0, now);
-  gains[next].gain.linearRampToValueAtTime(1, now + 0.5);
+  currentGain.cancelScheduledValues(now);
+  nextGain.cancelScheduledValues(now);
+  currentGain.setValueAtTime(1, now);
+  nextGain.setValueAtTime(0, now);
 
-  gains[active].gain.setValueAtTime(1, now);
-  gains[active].gain.linearRampToValueAtTime(0, now + 0.5);
+  currentGain.linearRampToValueAtTime(
+    0,
+    now + FADE_TIME
+  );
+
+  nextGain.linearRampToValueAtTime(
+    1,
+    now + FADE_TIME
+  );
 
   if (static) playStatic();
 
+  // UI update (not tied to audio timing)
   const label = document.getElementById("station");
   label.style.opacity = 0;
+
   setTimeout(() => {
     label.textContent = "Currently playing: " + station.name;
     label.style.opacity = 0.85;
-  }, 500);
+  }, FADE_TIME * 1000);
 
-  active = next;
-  next = 1 - active;
+  // Swap active AFTER scheduling
+  active = nextIndex;
+  station = stations[Math.floor(Math.random() * stations.length)];
+  const audio = audioEls[1 - active];
 
-  const station = stations[Math.floor(Math.random() * stations.length)];
-  const audio = audioEls[next];
+  audio.src = station.url;
+  audio.load();
 
   try {
-    audio.src = station.url;
-    audio.play();
-  } catch {
-    print("removing a ting");
+    await new Promise(r => setTimeout(r, SCHEDULE_OFFSET * 1000));
+    await audio.play();
+  } catch (err) {
+    console.warn("Audio play failed:", err);
   }
 
+  switching = false;
 }
+
 
 // Manages the looped scanning process once the button is pressed
 function toggleScanning() {
