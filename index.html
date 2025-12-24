@@ -40,10 +40,13 @@
 <body>
 
 <h1>Evanna's SpiritBox</h1>
-<div id="station">Click Start</div>
+<div id="station">Currently playing: </div>
 <button id="start">Start Scanning</button>
 <label for="stationDuration">Station Duration (seconds): <span id="durationLabel">8</span>s</label>
 <input type="range" id="stationDuration" min="0" max="10" value="8" step="0.1">
+<button id="staticOn">Turn off static noise</button>
+<label for="staticVolume">Static volume (percent): <span id="staticVolumeLabel">0.1</span></label>
+<input type="range" id="staticVolume" min="0" max="1" value="0.1" step="0.05">
 
 <audio id="audio1" crossorigin="anonymous"></audio>
 <audio id="audio2" crossorigin="anonymous"></audio>
@@ -73,6 +76,8 @@ let stations = [
 // Variables for station scan duration
 let stationDuration = 8;
 let intervalId = null;
+let static = true;
+let staticVolume = 0.2;
 
 // Variables for the audio elements and their respective soruces and volumes
 const ctx = new (window.AudioContext || window.webkitAudioContext)();
@@ -101,6 +106,12 @@ durationSlider.addEventListener("input", (e) => {
     clearInterval(intervalId);
     intervalId = setInterval(switchStation, stationDuration * 1000);
   }
+});
+
+// Function to change static volume with the value of the slider
+document.getElementById("staticVolume").addEventListener("input", (e) => {
+  staticVolume = Number(e.target.value);
+  document.getElementById("staticVolumeLabel").textContent = staticVolume;
 });
 
 // Function to load extra station names from the radio-browser website
@@ -133,7 +144,7 @@ function playStatic(duration = 0.1) {
   const data = buffer.getChannelData(0);
 
   for (let i = 0; i < data.length; i++) {
-    data[i] = Math.random() * 2 - 1;
+    data[i] = (Math.random() * 2 - 1)* staticVolume;
   }
 
   const noise = ctx.createBufferSource();
@@ -152,15 +163,17 @@ function switchStation() {
   gains[active].gain.cancelScheduledValues(now);
 
   gains[next].gain.setValueAtTime(0, now);
-  gains[next].gain.linearRampToValueAtTime(1, now + 0.1);
+  gains[next].gain.linearRampToValueAtTime(1, now + 0.5);
 
   gains[active].gain.setValueAtTime(1, now);
-  gains[active].gain.linearRampToValueAtTime(0, now + 0.1);
+  gains[active].gain.linearRampToValueAtTime(0, now + 0.5);
+
+  if (static) playStatic();
 
   const label = document.getElementById("station");
   label.style.opacity = 0;
   setTimeout(() => {
-    label.textContent = station.name;
+    label.textContent = "Currently playing: " + station.name;
     label.style.opacity = 0.85;
   }, 500);
 
@@ -169,10 +182,14 @@ function switchStation() {
 
   const station = stations[Math.floor(Math.random() * stations.length)];
   const audio = audioEls[next];
-  audio.src = station.url;
-  audio.play().catch(() => {});
 
-  //playStatic();
+  try {
+    audio.src = station.url;
+    audio.play();
+  } catch {
+    print("removing a ting");
+  }
+
 }
 
 // Manages the looped scanning process once the button is pressed
@@ -192,8 +209,33 @@ function toggleScanning() {
     intervalId = setInterval(switchStation, 8000);
   }
 }
-// Assigns the click action to function
+
+function toggleStatic(){
+  if (static) {
+    document.getElementById("staticOn").textContent = "Turn on static noise";
+  } else {
+    document.getElementById("staticOn").textContent = "Turn off static noise";
+  }
+  static = !static;
+}
+
+// Assigns the click action to function for scanning
 document.getElementById("start").onclick = toggleScanning;
+
+// Assigns the click action to function for static
+document.getElementById("staticOn").onclick = toggleStatic;
+
+var audio1 = document.getElementById('audio1');    
+audio1.addEventListener('error', function(e) {
+    var noSourcesLoaded = (this.networkState===HTMLMediaElement.NETWORK_NO_SOURCE);
+    if(noSourcesLoaded) stations = stations.filter(a => a.url !== audio1.src);
+}, true);
+
+var audio2 = document.getElementById('audio2');    
+audio2.addEventListener('error', function(e) {
+    var noSourcesLoaded = (this.networkState===HTMLMediaElement.NETWORK_NO_SOURCE);
+    if(noSourcesLoaded) stations = stations.filter(a => a.url !== audio2.src);
+}, true);
 
 // Call this once, e.g. on page load
 loadStations();
