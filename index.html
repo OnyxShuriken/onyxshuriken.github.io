@@ -118,6 +118,7 @@ staticVolumeSlider.addEventListener("input", (e) => {
   staticVolumeLabel.textContent = staticVolume;
 });
 
+// Indexing for audio objects
 let active = 0;
 let next = 1;
 let preload = 2;
@@ -125,7 +126,7 @@ let preload = 2;
 let currentStation = null;
 let switching = false;
 
-// Static noise
+// Plays a static sound
 function playStatic(duration = 0.1) {
   const buffer = ctx.createBuffer(1, ctx.sampleRate * duration, ctx.sampleRate);
   const data = buffer.getChannelData(0);
@@ -138,7 +139,7 @@ function playStatic(duration = 0.1) {
   noise.start();
 }
 
-// Station switching 
+// Switches stations
 async function switchStation() {
   if (switching) return;
   switching = true;
@@ -193,6 +194,7 @@ async function switchStation() {
   switching = false;
 }
 
+// Turns on and off scanning
 function toggleScanning() {
   const btn = document.getElementById("start");
 
@@ -210,16 +212,18 @@ function toggleScanning() {
   }
 }
 
+// Turns on and off static
 function toggleStatic() {
   static = !static;
   document.getElementById("staticOn").textContent =
     static ? "Turn off static noise" : "Turn on static noise";
 }
 
+// Assign click actions to respective functions
 document.getElementById("start").onclick = toggleScanning;
 document.getElementById("staticOn").onclick = toggleStatic;
 
-//  Load stations 
+// Dynamically loads more stations from radio-browser
 async function loadStations() {
   const response = await fetch(
     "https://de1.api.radio-browser.info/json/stations/bycountrycodeexact/GB?order=random&limit=300"
@@ -231,18 +235,17 @@ async function loadStations() {
         .slice(0, 100)
         .map(s => ({ name: s.name, url: s.url_resolved }))
   );
-
-  // preload first station
-  currentStation = stations[Math.floor(Math.random() * stations.length)];
-  audioEls[preload].src = currentStation.url;
-  audioEls[preload].load();
 }
 
 loadStations();
-switchStation();
-switchStation();
 
-</script>
+// Preload audio stream so button can be pressed right away
+currentStation = stations[Math.floor(Math.random() * stations.length)];
+audioEls[preload].src = currentStation.url;
+audioEls[preload].load();
+nextStation = stations[Math.floor(Math.random() * stations.length)];
+audioEls[next].src = nextStation.url;
+audioEls[next].load();
 
 
 </script>
