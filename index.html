@@ -50,7 +50,6 @@
 
 <audio id="audio1" crossorigin="anonymous"></audio>
 <audio id="audio2" crossorigin="anonymous"></audio>
-<audio id="audio3" crossorigin="anonymous"></audio>
 
 <script>
 // Backup list of stations in case the dynmaic search fails
@@ -74,179 +73,172 @@ let stations = [
   { name: "Heart Cumbria", url: "http://media-the.musicradio.com/HeartNorthLancsCumbria" }
 ];
 
+// Variables for station scan duration
 let stationDuration = 8;
 let intervalId = null;
 let static = true;
 let staticVolume = 0.2;
 
+// Variables for the audio elements and their respective soruces and volumes
 const ctx = new (window.AudioContext || window.webkitAudioContext)();
-
-const audioEls = [
-  document.getElementById("audio1"),
-  document.getElementById("audio2"),
-  document.getElementById("audio3")
-];
-
+const audioEls = [document.getElementById("audio1"), document.getElementById("audio2")];
 const sources = audioEls.map(el => ctx.createMediaElementSource(el));
-const gains = audioEls.map(() => ctx.createGain());
+const gains = [ctx.createGain(), ctx.createGain()];
+let active = 0;
 
+// Connect the gains and sources
 sources.forEach((src, i) => {
   src.connect(gains[i]).connect(ctx.destination);
   gains[i].gain.value = 0;
 });
 
-// Station duration slider
+// Update duration when slider moves
 const durationSlider = document.getElementById("stationDuration");
 const durationLabel = document.getElementById("durationLabel");
 
+// Function to change station length with the value of the slider
 durationSlider.addEventListener("input", (e) => {
   stationDuration = Number(e.target.value);
   durationLabel.textContent = stationDuration;
 
+  // If scanning is active, restart interval with new duration
   if (intervalId) {
     clearInterval(intervalId);
     intervalId = setInterval(switchStation, stationDuration * 1000);
   }
 });
 
-// Static volume slider 
-const staticVolumeSlider = document.getElementById("staticVolume");
-const staticVolumeLabel = document.getElementById("staticVolumeLabel");
-
-staticVolumeSlider.addEventListener("input", (e) => {
+// Function to change static volume with the value of the slider
+document.getElementById("staticVolume").addEventListener("input", (e) => {
   staticVolume = Number(e.target.value);
-  staticVolumeLabel.textContent = staticVolume;
+  document.getElementById("staticVolumeLabel").textContent = staticVolume;
 });
 
-// Indexing for audio objects
-let active = 0;
-let next = 1;
-let preload = 2;
-
-let currentStation = null;
-let switching = false;
-
-// Plays a static sound
-function playStatic(duration = 0.1) {
-  const buffer = ctx.createBuffer(1, ctx.sampleRate * duration, ctx.sampleRate);
-  const data = buffer.getChannelData(0);
-  for (let i = 0; i < data.length; i++) {
-    data[i] = (Math.random() * 2 - 1) * staticVolume;
-  }
-  const noise = ctx.createBufferSource();
-  noise.buffer = buffer;
-  noise.connect(ctx.destination);
-  noise.start();
-}
-
-// Switches stations
-async function switchStation() {
-  if (switching) return;
-  switching = true;
-
-  if (ctx.state !== "running") {
-    await ctx.resume();
-  }
-
-  const FADE = 0.6;
-  const now = ctx.currentTime;
-
-  const gActive = gains[active].gain;
-  const gNext = gains[next].gain;
-
-  gActive.cancelScheduledValues(now);
-  gNext.cancelScheduledValues(now);
-
-  gActive.setValueAtTime(1, now);
-  gNext.setValueAtTime(0, now);
-
-  gActive.linearRampToValueAtTime(0, now + FADE);
-  gNext.linearRampToValueAtTime(1, now + FADE);
-
-  if (static) playStatic();
-
-  try {
-    await audioEls[next].play();
-  } catch (e) {
-    console.warn("play failed", e);
-  }
-
-  const label = document.getElementById("station");
-  label.style.opacity = 0;
-  setTimeout(() => {
-    label.textContent = "Currently playing: " + currentStation.name;
-    label.style.opacity = 0.85;
-  }, FADE * 1000);
-
-  const oldActive = active;
-  active = next;
-  next = preload;
-  preload = oldActive;
-
-  const preloadAudio = audioEls[preload];
-  preloadAudio.pause();
-  preloadAudio.currentTime = 0;
-
-  currentStation = stations[Math.floor(Math.random() * stations.length)];
-  preloadAudio.src = currentStation.url;
-  preloadAudio.load();
-
-  switching = false;
-}
-
-// Turns on and off scanning
-function toggleScanning() {
-  const btn = document.getElementById("start");
-
-  if (btn.textContent === "Stop Scanning") {
-    btn.textContent = "Start Scanning";
-    clearInterval(intervalId);
-    intervalId = null;
-    audioEls.forEach(a => a.pause());
-    ctx.suspend();
-  } else {
-    btn.textContent = "Stop Scanning";
-    ctx.resume();
-    switchStation();
-    intervalId = setInterval(switchStation, stationDuration * 1000);
-  }
-}
-
-// Turns on and off static
-function toggleStatic() {
-  static = !static;
-  document.getElementById("staticOn").textContent =
-    static ? "Turn off static noise" : "Turn on static noise";
-}
-
-// Assign click actions to respective functions
-document.getElementById("start").onclick = toggleScanning;
-document.getElementById("staticOn").onclick = toggleStatic;
-
-// Dynamically loads more stations from radio-browser
+// Function to load extra station names from the radio-browser website
 async function loadStations() {
   const response = await fetch(
     "https://de1.api.radio-browser.info/json/stations/bycountrycodeexact/GB?order=random&limit=300"
   );
   const data = await response.json();
 
-  stations = stations.concat(
-    data.filter(s => s.url_resolved && /mp3|aac/i.test(s.codec))
-        .slice(0, 100)
-        .map(s => ({ name: s.name, url: s.url_resolved }))
-  );
+  // Filter out by embedded audio friendly sources
+  stations = stations.concat(data
+    .filter(s =>
+      s.url_resolved &&
+      s.codec &&
+      /mp3|aac/i.test(s.codec)
+    )
+    .sort(() => Math.random() - 0.5)
+    .slice(0, 100)
+    .map(s => ({
+      name: s.name,
+      url: s.url_resolved
+    })));
+
+  console.log("Loaded stations:", stations);
 }
 
+// Function to create a static noise
+function playStatic(duration = 0.1) {
+  const buffer = ctx.createBuffer(1, ctx.sampleRate * duration, ctx.sampleRate);
+  const data = buffer.getChannelData(0);
+
+  for (let i = 0; i < data.length; i++) {
+    data[i] = (Math.random() * 2 - 1)* staticVolume;
+  }
+
+  const noise = ctx.createBufferSource();
+  noise.buffer = buffer;
+  noise.connect(ctx.destination);
+  noise.start();
+}
+
+// Function to change to a random station
+function switchStation() {
+  const now = ctx.currentTime;
+
+  next = 1 - active;
+
+  gains[next].gain.cancelScheduledValues(now);
+  gains[active].gain.cancelScheduledValues(now);
+
+  gains[next].gain.setValueAtTime(0, now);
+  gains[next].gain.linearRampToValueAtTime(1, now + 0.5);
+
+  gains[active].gain.setValueAtTime(1, now);
+  gains[active].gain.linearRampToValueAtTime(0, now + 0.5);
+
+  if (static) playStatic();
+
+  const label = document.getElementById("station");
+  label.style.opacity = 0;
+  setTimeout(() => {
+    label.textContent = "Currently playing: " + station.name;
+    label.style.opacity = 0.85;
+  }, 500);
+
+  active = next;
+  next = 1 - active;
+
+  const station = stations[Math.floor(Math.random() * stations.length)];
+  const audio = audioEls[next];
+
+  try {
+    audio.src = station.url;
+    audio.play();
+  } catch {
+    print("removing a ting");
+  }
+
+}
+
+// Manages the looped scanning process once the button is pressed
+function toggleScanning() {
+  if (document.getElementById("start").textContent == "Stop Scanning"){
+    document.getElementById("start").textContent = "Start Scanning";
+    intervalId = null;
+    audioEls[active].src = null;
+    ctx.suspend();
+  }
+  else {
+    document.getElementById("start").textContent = "Stop Scanning";
+    ctx.resume();
+    if (intervalId) return;
+
+    switchStation();
+    intervalId = setInterval(switchStation, 8000);
+  }
+}
+
+function toggleStatic(){
+  if (static) {
+    document.getElementById("staticOn").textContent = "Turn on static noise";
+  } else {
+    document.getElementById("staticOn").textContent = "Turn off static noise";
+  }
+  static = !static;
+}
+
+// Assigns the click action to function for scanning
+document.getElementById("start").onclick = toggleScanning;
+
+// Assigns the click action to function for static
+document.getElementById("staticOn").onclick = toggleStatic;
+
+var audio1 = document.getElementById('audio1');    
+audio1.addEventListener('error', function(e) {
+    var noSourcesLoaded = (this.networkState===HTMLMediaElement.NETWORK_NO_SOURCE);
+    if(noSourcesLoaded) stations = stations.filter(a => a.url !== audio1.src);
+}, true);
+
+var audio2 = document.getElementById('audio2');    
+audio2.addEventListener('error', function(e) {
+    var noSourcesLoaded = (this.networkState===HTMLMediaElement.NETWORK_NO_SOURCE);
+    if(noSourcesLoaded) stations = stations.filter(a => a.url !== audio2.src);
+}, true);
+
+// Call this once, e.g. on page load
 loadStations();
-
-// Preload audio stream so button can be pressed right away
-currentStation = stations[Math.floor(Math.random() * stations.length)];
-audioEls[preload].src = currentStation.url;
-audioEls[preload].load();
-nextStation = stations[Math.floor(Math.random() * stations.length)];
-audioEls[next].src = nextStation.url;
-audioEls[next].load();
-
 
 </script>
 
